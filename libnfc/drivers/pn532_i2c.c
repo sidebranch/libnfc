@@ -468,15 +468,17 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
   // Actual I2C response frame includes an additional status byte,
   // so we use a temporary buffer to read the I2C frame
   uint8_t i2cRx[PN53x_EXTENDED_FRAME__DATA_MAX_LEN + 1];
+  int count = 0;
 
   if (timeout > 0) {
     // If a timeout is specified, get current timestamp
     gettimeofday(&start_tv, NULL);
   }
-
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+          "pn532_i2c_wait_rdyframe().");
   do {
     int recCount = pn532_i2c_read(DRIVER_DATA(pnd)->dev, i2cRx, szDataLen + 1);
-
+    count++;
     if (DRIVER_DATA(pnd)->abort_flag) {
       // Reset abort flag
       DRIVER_DATA(pnd)->abort_flag = false;
@@ -517,7 +519,8 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
       }
     }
   } while (!done);
-
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+          "pn532_i2c_wait_rdyframe() polled %d times", count);
   return res;
 }
 
