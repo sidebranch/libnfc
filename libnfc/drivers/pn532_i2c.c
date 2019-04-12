@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include <gpiod.h>
 #include <nfc/nfc.h>
 
 #include "drivers.h"
@@ -347,7 +348,6 @@ pn532_i2c_open(const nfc_context *context, const nfc_connstring connstring)
     pn532_i2c_close(pnd);
     return NULL;
   }
-
   pn53x_init(pnd);
   return pnd;
 }
@@ -477,6 +477,19 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
   log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
           "pn532_i2c_wait_rdyframe().");
   do {
+    int irq = 0;
+    int irq_poll_count = 0;
+    do {
+#if 0
+      irq = gpiod_ctxless_get_value("gpiochip4", 10, 1/*active low*/, "libnfc");
+#else
+      irq = gpiod_simple_get_value("libnfc", "gpiochip4", 10, 1/*active low*/);
+#endif
+      irq_poll_count++;
+      usleep(1000);
+    } while (!irq);
+    log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+        "pn532_i2c_wait_rdyframe() irq_poll_count=%d", irq_poll_count);
     int recCount = pn532_i2c_read(DRIVER_DATA(pnd)->dev, i2cRx, szDataLen + 1);
     count++;
     if (DRIVER_DATA(pnd)->abort_flag) {

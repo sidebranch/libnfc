@@ -36,7 +36,7 @@ endif
 
 if LIBUSB_ENABLED
   libnfc_la_CFLAGS += @libusb_CFLAGS@ -DHAVE_LIBUSB
-  libnfc_la_LIBADD  += @libusb_LIBS@
+  libnfc_la_LIBADD  += @libusb_LIBS@ -lgpiod
 endif
 
 if WITH_LOG
