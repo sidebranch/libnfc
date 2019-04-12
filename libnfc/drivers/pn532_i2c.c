@@ -108,6 +108,55 @@ static size_t pn532_i2c_scan(const nfc_context *context, nfc_connstring connstri
 #define PN532_BUS_FREE_TIME 5
 static struct timespec __transaction_stop;
 
+/* subtracts t2 from t1, the result is in t1
+ * t1 and t2 should be already normalized, i.e. nsec in [0, 1000000000)
+ */
+static void timespec_sub(struct timespec *t1, const struct timespec *t2)
+{
+  t1->tv_sec -= t2->tv_sec;
+  t1->tv_nsec -= t2->tv_nsec;
+  if (t1->tv_nsec >= 1000000000)
+  {
+    t1->tv_sec++;
+    t1->tv_nsec -= 1000000000;
+  }
+  else if (t1->tv_nsec < 0)
+  {
+    t1->tv_sec--;
+    t1->tv_nsec += 1000000000;
+  }
+}
+
+static wait_bus_free_time(char *caller)
+{
+  struct timespec transaction_start, bus_free_time = { 0, 0 }, remaining = { 0, PN532_BUS_FREE_TIME * 1000 * 1000 };
+  clock_gettime(CLOCK_MONOTONIC, &transaction_start);
+#if 0
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "now      : %ld.%09ld",
+    transaction_start.tv_sec, transaction_start.tv_nsec);
+#endif
+  bus_free_time = transaction_start;
+  /* time passed since last STOP condition */
+  timespec_sub(&bus_free_time, &__transaction_stop);
+#if 0
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "passed   : %ld.%09ld",
+    bus_free_time.tv_sec, bus_free_time.tv_nsec);
+#endif
+  /* calculate remaining required bus free time required */
+  timespec_sub(&remaining, &bus_free_time);
+#if 0
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "remaining: %ld.%09ld",
+    remaining.tv_sec, remaining.tv_nsec);
+#endif
+  /* need more time to wait? */
+  if ((remaining.tv_sec == 0) && (remaining.tv_nsec >=0)) {
+#if 0
+    log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "%s sleep %ld ns", caller, remaining.tv_nsec);
+#endif
+    nanosleep(&remaining, NULL);
+  }
+}
+
 /**
  * @brief Wrapper around i2c_read to ensure proper timing by respecting the
  * 	  minimal free bus time between a STOP condition and a START condition.
@@ -123,14 +172,8 @@ static struct timespec __transaction_stop;
 static ssize_t pn532_i2c_read(const i2c_device id,
                               uint8_t *buf, const size_t len)
 {
-  struct timespec transaction_start, bus_free_time = { 0, 0 };
   ssize_t ret;
-
-  clock_gettime(CLOCK_MONOTONIC, &transaction_start);
-  bus_free_time.tv_nsec = (PN532_BUS_FREE_TIME * 1000 * 1000) -
-                          (transaction_start.tv_nsec - __transaction_stop.tv_nsec);
-  nanosleep(&bus_free_time, NULL);
-
+  wait_bus_free_time("pn532_i2c_read()");
   ret = i2c_read(id, buf, len);
   clock_gettime(CLOCK_MONOTONIC, &__transaction_stop);
   return ret;
@@ -151,15 +194,8 @@ static ssize_t pn532_i2c_read(const i2c_device id,
 static ssize_t pn532_i2c_write(const i2c_device id,
                                const uint8_t *buf, const size_t len)
 {
-  struct timespec transaction_start, bus_free_time = { 0, 0 };
   ssize_t ret;
-
-  clock_gettime(CLOCK_MONOTONIC, &transaction_start);
-  bus_free_time.tv_nsec = (PN532_BUS_FREE_TIME * 1000 * 1000) -
-                          (transaction_start.tv_nsec - __transaction_stop.tv_nsec);
-  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "pn532_i2c_write(): sleep %d ns", bus_free_time.tv_nsec);
-  nanosleep(&bus_free_time, NULL);
-
+  wait_bus_free_time("pn532_i2c_write())");
   ret = i2c_write(id, buf, len);
   clock_gettime(CLOCK_MONOTONIC, &__transaction_stop);
   return ret;
@@ -488,7 +524,7 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
 #endif
       irq_poll_count++;
       usleep(1000);
-    } while (!irq && !DRIVER_DATA(pnd)->abort_flag && (irq_poll_count < 10));
+    } while ((!irq) && (!DRIVER_DATA(pnd)->abort_flag) && (irq_poll_count < 100));
     log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
         "pn532_i2c_wait_rdyframe() irq_poll_count=%d", irq_poll_count);
     int recCount = pn532_i2c_read(DRIVER_DATA(pnd)->dev, i2cRx, szDataLen + 1);
