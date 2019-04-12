@@ -157,6 +157,7 @@ static ssize_t pn532_i2c_write(const i2c_device id,
   clock_gettime(CLOCK_MONOTONIC, &transaction_start);
   bus_free_time.tv_nsec = (PN532_BUS_FREE_TIME * 1000 * 1000) -
                           (transaction_start.tv_nsec - __transaction_stop.tv_nsec);
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "pn532_i2c_write(): sleep %d ns", bus_free_time.tv_nsec);
   nanosleep(&bus_free_time, NULL);
 
   ret = i2c_write(id, buf, len);
@@ -468,7 +469,7 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
   // Actual I2C response frame includes an additional status byte,
   // so we use a temporary buffer to read the I2C frame
   uint8_t i2cRx[PN53x_EXTENDED_FRAME__DATA_MAX_LEN + 1];
-  int count = 0;
+  int i2c_poll_count = 0;
 
   if (timeout > 0) {
     // If a timeout is specified, get current timestamp
@@ -487,11 +488,11 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
 #endif
       irq_poll_count++;
       usleep(1000);
-    } while (!irq);
+    } while (!irq && !DRIVER_DATA(pnd)->abort_flag && (irq_poll_count < 10));
     log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
         "pn532_i2c_wait_rdyframe() irq_poll_count=%d", irq_poll_count);
     int recCount = pn532_i2c_read(DRIVER_DATA(pnd)->dev, i2cRx, szDataLen + 1);
-    count++;
+    i2c_poll_count++;
     if (DRIVER_DATA(pnd)->abort_flag) {
       // Reset abort flag
       DRIVER_DATA(pnd)->abort_flag = false;
@@ -533,7 +534,7 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
     }
   } while (!done);
   log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
-          "pn532_i2c_wait_rdyframe() polled %d times", count);
+          "pn532_i2c_wait_rdyframe() polled I2C %d times", i2c_poll_count);
   return res;
 }
 
@@ -658,6 +659,7 @@ error:
 int
 pn532_i2c_ack(nfc_device *pnd)
 {
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "%s", "pn532_i2c_ack()");
   return pn532_i2c_write(DRIVER_DATA(pnd)->dev, pn53x_ack_frame, sizeof(pn53x_ack_frame));
 }
 
