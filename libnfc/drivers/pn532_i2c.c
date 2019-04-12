@@ -524,7 +524,7 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
 #endif
       irq_poll_count++;
       usleep(1000);
-    } while ((!irq) && (!DRIVER_DATA(pnd)->abort_flag) && (irq_poll_count < 100));
+    } while ((!irq) && (!DRIVER_DATA(pnd)->abort_flag) && (irq_poll_count < 1000));
     log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
         "pn532_i2c_wait_rdyframe() irq_poll_count=%d", irq_poll_count);
     int recCount = pn532_i2c_read(DRIVER_DATA(pnd)->dev, i2cRx, szDataLen + 1);
