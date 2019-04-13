@@ -150,7 +150,7 @@ static void wait_bus_free_time(char *caller)
   /* need more time to wait? */
   if ((remaining.tv_sec == 0) && (remaining.tv_nsec >=0)) {
 #if 1
-    log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "%s sleeps %ld ns to respect minimum STOP to START idle time", caller, remaining.tv_nsec);
+    log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG, "%s sleeps %ld ns to respect minimum STOP to START idle time", caller, remaining.tv_nsec);
 #endif
     nanosleep(&remaining, NULL);
   }
