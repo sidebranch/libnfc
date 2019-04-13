@@ -127,15 +127,14 @@ static void timespec_sub(struct timespec *t1, const struct timespec *t2)
   }
 }
 
-static wait_bus_free_time(char *caller)
+static void wait_bus_free_time(char *caller)
 {
-  struct timespec transaction_start, bus_free_time = { 0, 0 }, remaining = { 0, PN532_BUS_FREE_TIME * 1000 * 1000 };
-  clock_gettime(CLOCK_MONOTONIC, &transaction_start);
+  struct timespec bus_free_time, remaining = { 0, PN532_BUS_FREE_TIME * 1000 * 1000 };
+  clock_gettime(CLOCK_MONOTONIC, &bus_free_time);
 #if 0
   log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "now      : %ld.%09ld",
     transaction_start.tv_sec, transaction_start.tv_nsec);
 #endif
-  bus_free_time = transaction_start;
   /* time passed since last STOP condition */
   timespec_sub(&bus_free_time, &__transaction_stop);
 #if 0
@@ -150,8 +149,8 @@ static wait_bus_free_time(char *caller)
 #endif
   /* need more time to wait? */
   if ((remaining.tv_sec == 0) && (remaining.tv_nsec >=0)) {
-#if 0
-    log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "%s sleep %ld ns", caller, remaining.tv_nsec);
+#if 1
+    log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_ERROR, "%s sleeps %ld ns to respect minimum STOP to START idle time", caller, remaining.tv_nsec);
 #endif
     nanosleep(&remaining, NULL);
   }
@@ -513,20 +512,31 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
   }
   log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
           "pn532_i2c_wait_rdyframe().");
+  /* I2C poll loop */
   do {
+
+#if 1 /* WIP - implements IRQ polling to reduce I2C bus polling load */
     int irq = 0;
     int irq_poll_count = 0;
+    /* IRQ poll loop. @TODO replace by event driven libgpiod call */
     do {
-#if 0
+    /*  @NOTE GPIO pin hard-coded. @TODO The GPIO pin requires configuration via nfc_device */
+
+#ifdef GPIOD_UNUSED /* stable libgpiod API? (this macro define is not in the old header file) */
       irq = gpiod_ctxless_get_value("gpiochip4", 10, 1/*active low*/, "libnfc");
-#else
+#else /* old libgpiod API */
       irq = gpiod_simple_get_value("libnfc", "gpiochip4", 10, 1/*active low*/);
 #endif
+
       irq_poll_count++;
+      /* sleep 1 ms to prevent full CPU load */
       usleep(1000);
+    /* until IRQ, or aborted, or 1 second of IRQ polling */
     } while ((!irq) && (!DRIVER_DATA(pnd)->abort_flag) && (irq_poll_count < 1000));
     log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
         "pn532_i2c_wait_rdyframe() irq_poll_count=%d", irq_poll_count);
+#endif /* WIP - IRQ polling */
+
     int recCount = pn532_i2c_read(DRIVER_DATA(pnd)->dev, i2cRx, szDataLen + 1);
     i2c_poll_count++;
     if (DRIVER_DATA(pnd)->abort_flag) {
