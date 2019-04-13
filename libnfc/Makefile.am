@@ -36,8 +36,11 @@ endif
 
 if LIBUSB_ENABLED
   libnfc_la_CFLAGS += @libusb_CFLAGS@ -DHAVE_LIBUSB
-  libnfc_la_LIBADD  += @libusb_LIBS@ -lgpiod
+  libnfc_la_LIBADD  += @libusb_LIBS@
 endif
+
+# @TODO: implement and use LIBGPIOD_ENABLED
+libnfc_la_LIBADD  += -lgpiod
 
 if WITH_LOG
   libnfc_la_SOURCES += log.c log-internal.c
