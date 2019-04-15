@@ -70,9 +70,16 @@
 // Internal data structs
 const struct pn53x_io pn532_i2c_io;
 
+// @TODO move to configuration
+#define HAVE_LIBGPIOD
+
 struct pn532_i2c_data {
   i2c_device dev;
   volatile bool abort_flag;
+#ifdef HAVE_LIBGPIOD
+  struct gpiod_chip *gpio_chip;
+  struct gpiod_line *gpio_line;
+#endif
 };
 
 /* preamble and start bytes, see pn532-internal.h for details */
@@ -305,6 +312,13 @@ static void
 pn532_i2c_close(nfc_device *pnd)
 {
   pn53x_idle(pnd);
+#if 0 /* @TODO bug in libgpiod 0.3.1? crashes as line->handle is not a pointer but has value 0xa */
+#ifdef HAVE_LIBGPIOD
+  /* release GPIO IRQ line */
+  if (DRIVER_DATA(pnd)->gpio_line) gpiod_line_release(DRIVER_DATA(pnd)->gpio_line);
+  if (DRIVER_DATA(pnd)->gpio_chip) gpiod_chip_close(DRIVER_DATA(pnd)->gpio_chip);
+#endif
+#endif
   i2c_close(DRIVER_DATA(pnd)->dev);
 
   pn53x_data_free(pnd);
@@ -377,6 +391,33 @@ pn532_i2c_open(const nfc_context *context, const nfc_connstring connstring)
   pnd->driver = &pn532_i2c_driver;
 
   DRIVER_DATA(pnd)->abort_flag = false;
+
+#ifdef HAVE_LIBGPIOD
+  /* request GPIO IRQ line */
+  struct gpiod_chip *chip = NULL;
+  struct gpiod_line *line = NULL;
+  chip = gpiod_chip_open("/dev/gpiochip4");
+  if (chip) {
+    line = gpiod_chip_get_line(chip, 10);
+    /* obtained line? */
+    if (line) {
+#ifdef GPIOD_UNUSED /* stable libgpiod API? (this macro define is not in the old header file) */
+      gpiod_line_request_falling_edge_events(line, "libnfc");
+#else
+      gpiod_line_event_request_falling(line, "libnfc", 0/*pretend active high*/);
+
+#endif
+      DRIVER_DATA(pnd)->gpio_chip = chip;
+      DRIVER_DATA(pnd)->gpio_line = line;
+    /* opened chip but could not claim line? */
+    } else {
+      /* close the chip */
+      gpiod_chip_close(chip);
+    }
+  }
+  log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+    "pn532_i2c_wait_rdyframe() Did %s get IRQ GPIO line", (chip && line)? "": "NOT");
+#endif
 
   // Check communication using "Diagnose" command, with "Communication test" (0x00)
   if (pn53x_check_communication(pnd) < 0) {
@@ -515,7 +556,32 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
   /* I2C poll loop */
   do {
 
-#if 1 /* WIP - implements IRQ polling to reduce I2C bus polling load */
+#if 1 /* WIP - IRQ event driven wait */
+    if (DRIVER_DATA(pnd)->gpio_line) {
+      struct timespec irq_timeout = { 1, 0 } /* 1 second */;
+      log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+        "pn532_i2c_wait_rdyframe() gpiod_line_event_wait");
+      int rc = gpiod_line_event_wait(DRIVER_DATA(pnd)->gpio_line, &irq_timeout);
+      log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+        "pn532_i2c_wait_rdyframe() gpiod_line_event_wait=%d", rc);
+#if 0
+      if (rc == 1) {
+        struct gpiod_line_event gpio_event;
+        rc = gpiod_line_event_read(DRIVER_DATA(pnd)->gpio_line, &gpio_event);
+        if (rc == 0) {
+          if (gpio_event.event_type == GPIOD_EVENT_RISING_EDGE) {
+            log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+              "pn532_i2c_wait_rdyframe() GPIOD_EVENT_RISING_EDGE");
+
+          } else if (gpio_event.event_type == GPIOD_EVENT_FALLING_EDGE) {
+            log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
+              "pn532_i2c_wait_rdyframe() GPIOD_EVENT_FALLING_EDGE");
+          }
+        }
+      }
+#endif
+    }
+#elif 1 /* WIP - implements IRQ polling to reduce I2C bus polling load */
     int irq = 0;
     int irq_poll_count = 0;
     /* IRQ poll loop. @TODO replace by event driven libgpiod call */
@@ -535,7 +601,9 @@ pn532_i2c_wait_rdyframe(nfc_device *pnd, uint8_t *pbtData, const size_t szDataLe
     } while ((!irq) && (!DRIVER_DATA(pnd)->abort_flag) && (irq_poll_count < 1000));
     log_put(LOG_GROUP, LOG_CATEGORY, NFC_LOG_PRIORITY_DEBUG,
         "pn532_i2c_wait_rdyframe() irq_poll_count=%d", irq_poll_count);
+
 #endif /* WIP - IRQ polling */
+
 
     int recCount = pn532_i2c_read(DRIVER_DATA(pnd)->dev, i2cRx, szDataLen + 1);
     i2c_poll_count++;
